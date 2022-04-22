@@ -299,7 +299,7 @@ fn variant_i_frame_stream_tag(i: &[u8]) -> IResult<&[u8], VariantStream> {
 }
 
 fn alternative_media_tag(i: &[u8]) -> IResult<&[u8], AlternativeMedia> {
-    map(pair(tag("#EXT-X-MEDIA:"), key_value_pairs), |(_, media)| {
+    map_res(pair(tag("#EXT-X-MEDIA:"), key_value_pairs), |(_, media)| {
         AlternativeMedia::from_hashmap(media)
     })(i)
 }
@@ -535,7 +535,7 @@ fn duration_title_tag(i: &[u8]) -> IResult<&[u8], (f32, Option<String>)> {
 }
 
 fn key(i: &[u8]) -> IResult<&[u8], Key> {
-    map(key_value_pairs, Key::from_hashmap)(i)
+    map_res(key_value_pairs, Key::from_hashmap)(i)
 }
 
 fn extmap(i: &[u8]) -> IResult<&[u8], Map> {

@@ -33,11 +33,84 @@ macro_rules! write_some_attribute {
 }
 
 macro_rules! bool_default_false {
-    ($optional:expr) => {
-        match $optional {
-            Some(ref s) if s == "YES" => true,
-            Some(_) | None => false,
+    ($attrs:expr, $attr:expr) => {
+        match $attrs.remove($attr) {
+            Some(QuotedOrUnquoted::Unquoted(ref s)) if s == "YES" => true,
+            Some(QuotedOrUnquoted::Unquoted(ref s)) if s == "NO" => false,
+            Some(ref s) => {
+                return Err(format!(
+                    "Can't create bool from {} for {} attribute",
+                    s, $attr
+                ))
+            }
+            None => false,
         }
+    };
+}
+
+macro_rules! quoted_string {
+    ($attrs:expr, $attr:expr) => {
+        match $attrs.remove($attr) {
+            Some(QuotedOrUnquoted::Quoted(s)) => Some(s),
+            Some(QuotedOrUnquoted::Unquoted(_)) => {
+                return Err(format!(
+                    "Can't create {} attribute from unquoted string",
+                    $attr
+                ))
+            }
+            None => None,
+        }
+    };
+}
+
+macro_rules! unquoted_string {
+    ($attrs:expr, $attr:expr) => {
+        match $attrs.remove($attr) {
+            Some(QuotedOrUnquoted::Unquoted(s)) => Some(s),
+            Some(QuotedOrUnquoted::Quoted(_)) => {
+                return Err(format!(
+                    "Can't create {} attribute from quoted string",
+                    $attr
+                ))
+            }
+            None => None,
+        }
+    };
+}
+
+macro_rules! unquoted_string_parse {
+    ($attrs:expr, $attr:expr, $parse:expr) => {
+        match $attrs.remove($attr) {
+            Some(QuotedOrUnquoted::Unquoted(s)) => Some(($parse(s.as_str()))?),
+            Some(QuotedOrUnquoted::Quoted(_)) => {
+                return Err(format!(
+                    "Can't create {} attribute from quoted string",
+                    $attr
+                ))
+            }
+            None => None,
+        }
+    };
+    ($attrs:expr, $attr:expr) => {
+        unquoted_string_parse!($attrs, $attr, |s: &str| s.parse())
+    };
+}
+
+macro_rules! quoted_string_parse {
+    ($attrs:expr, $attr:expr, $parse:expr) => {
+        match $attrs.remove($attr) {
+            Some(QuotedOrUnquoted::Quoted(s)) => Some(($parse(s.as_str()))?),
+            Some(QuotedOrUnquoted::Unquoted(_)) => {
+                return Err(format!(
+                    "Can't create {} attribute from unquoted string",
+                    $attr
+                ))
+            }
+            None => None,
+        }
+    };
+    ($attrs:expr, $attr:expr) => {
+        quoted_string_parse!($attrs, $attr, |s: &str| s.parse())
     };
 }
 
@@ -152,6 +225,7 @@ pub struct VariantStream {
     pub subtitles: Option<String>,
     pub closed_captions: Option<ClosedCaptionGroupId>,
     // PROGRAM-ID tag was removed in protocol version 6
+    pub other_attributes: HashMap<String, QuotedOrUnquoted>,
 }
 
 impl VariantStream {
@@ -159,98 +233,25 @@ impl VariantStream {
         mut attrs: HashMap<String, QuotedOrUnquoted>,
         is_i_frame: bool,
     ) -> Result<VariantStream, String> {
-        let uri = attrs
-            .remove("URI")
-            .map(|c| {
-                c.as_quoted()
-                    .ok_or_else(|| format!("URI attribute is an unquoted string"))
-                    .map(|s| s.to_string())
-            })
-            .transpose()?
-            .unwrap_or_default();
-        let bandwidth = attrs
-            .remove("BANDWIDTH")
-            .ok_or_else(|| String::from("Mandatory bandwidth attribute not included"))
-            .and_then(|s| {
-                s.as_unquoted()
-                    .ok_or_else(|| String::from("Bandwidth attribute is a quoted string"))
-                    .and_then(|s| {
-                        s.trim()
-                            .parse::<u64>()
-                            .map_err(|err| format!("Failed to parse bandwidth attribute: {}", err))
-                    })
-            })?;
-        let average_bandwidth = attrs
-            .remove("AVERAGE-BANDWIDTH")
-            .map(|s| {
-                s.as_unquoted()
-                    .ok_or_else(|| String::from("Average bandwidth attribute is a quoted string"))
-                    .and_then(|s| {
-                        s.trim().parse::<u64>().map_err(|err| {
-                            format!("Failed to parse average bandwidth attribute: {}", err)
-                        })
-                    })
-            })
-            .transpose()?;
-        let codecs = attrs
-            .remove("CODECS")
-            .map(|c| {
-                c.as_quoted()
-                    .ok_or_else(|| format!("Codecs attribute is an unquoted string"))
-                    .map(|s| s.to_string())
-            })
-            .transpose()?;
-        let resolution = attrs
-            .remove("RESOLUTION")
-            .map(|r| {
-                r.as_unquoted()
-                    .ok_or_else(|| format!("Resolution attribute is a quoted string"))
-                    .and_then(|s| s.parse::<Resolution>())
-            })
-            .transpose()?;
-        let frame_rate = attrs
-            .remove("FRAME-RATE")
-            .map(|f| {
-                f.as_unquoted()
-                    .ok_or_else(|| format!("Framerate attribute is a quoted string"))
-                    .and_then(|s| {
-                        s.parse::<f64>()
-                            .map_err(|err| format!("Failed to parse framerate: {}", err))
-                    })
-            })
-            .transpose()?;
-        let hdcp_level = attrs
-            .remove("HDCP-LEVEL")
-            .map(|r| {
-                r.as_unquoted()
-                    .ok_or_else(|| format!("HDCP level attribute is a quoted string"))
-                    .and_then(|s| s.parse::<HDCPLevel>())
-            })
-            .transpose()?;
-        let audio = attrs
-            .remove("AUDIO")
-            .map(|c| {
-                c.as_quoted()
-                    .ok_or_else(|| format!("Audio attribute is an unquoted string"))
-                    .map(|s| s.to_string())
-            })
-            .transpose()?;
-        let video = attrs
-            .remove("VIDEO")
-            .map(|c| {
-                c.as_quoted()
-                    .ok_or_else(|| format!("Video attribute is an unquoted string"))
-                    .map(|s| s.to_string())
-            })
-            .transpose()?;
-        let subtitles = attrs
-            .remove("SUBTITLES")
-            .map(|c| {
-                c.as_quoted()
-                    .ok_or_else(|| format!("Subtitles attribute is an unquoted string"))
-                    .map(|s| s.to_string())
-            })
-            .transpose()?;
+        let uri = quoted_string!(attrs, "URI").unwrap_or_default();
+
+        let bandwidth = unquoted_string_parse!(attrs, "BANDWIDTH", |s: &str| s
+            .parse::<u64>()
+            .map_err(|err| format!("Failed to parse BANDWIDTH attribute: {}", err)))
+        .ok_or_else(|| String::from("EXT-X-STREAM-INF without mandatory BANDWIDTH attribute"))?;
+        let average_bandwidth = unquoted_string_parse!(attrs, "AVERAGE-BANDWIDTH", |s: &str| s
+            .parse::<u64>()
+            .map_err(|err| format!("Failed to parse AVERAGE-BANDWIDTH: {}", err)));
+
+        let codecs = quoted_string!(attrs, "CODECS");
+        let resolution = unquoted_string_parse!(attrs, "RESOLUTION");
+        let frame_rate = unquoted_string_parse!(attrs, "FRAME-RATE", |s: &str| s
+            .parse::<f64>()
+            .map_err(|err| format!("Failed to parse FRAME-RATE attribute: {}", err)));
+        let hdcp_level = unquoted_string_parse!(attrs, "HDCP-LEVEL");
+        let audio = quoted_string!(attrs, "AUDIO");
+        let video = quoted_string!(attrs, "VIDEO");
+        let subtitles = quoted_string!(attrs, "SUBTITLES");
         let closed_captions = attrs
             .remove("CLOSED-CAPTIONS")
             .map(|c| c.try_into())
@@ -324,13 +325,13 @@ impl FromStr for Resolution {
             Some((width, height)) => {
                 let width = width
                     .parse::<u64>()
-                    .map_err(|err| format!("Can't parse resolution attribute: {}", err))?;
+                    .map_err(|err| format!("Can't parse RESOLUTION attribute width: {}", err))?;
                 let height = height
                     .parse::<u64>()
-                    .map_err(|err| format!("Can't parse resolution attribute: {}", err))?;
+                    .map_err(|err| format!("Can't parse RESOLUTION attribute height: {}", err))?;
                 Ok(Resolution { width, height })
             }
-            None => Err(String::from("Invalid resolution attribute")),
+            None => Err(String::from("Invalid RESOLUTION attribute")),
         }
     }
 }
@@ -340,6 +341,7 @@ pub enum HDCPLevel {
     Type0,
     Type1,
     None,
+    Other(String),
 }
 
 impl FromStr for HDCPLevel {
@@ -373,6 +375,7 @@ impl fmt::Display for HDCPLevel {
 pub enum ClosedCaptionGroupId {
     None,
     GroupId(String),
+    Other(String),
 }
 
 impl TryFrom<QuotedOrUnquoted> for ClosedCaptionGroupId {
@@ -410,36 +413,77 @@ pub struct AlternativeMedia {
     pub default: bool, // Its absence indicates an implicit value of NO
     pub autoselect: bool, // Its absence indicates an implicit value of NO
     pub forced: bool, // Its absence indicates an implicit value of NO
-    pub instream_id: Option<String>,
+    pub instream_id: Option<InstreamId>,
     pub characteristics: Option<String>,
     pub channels: Option<String>,
+    pub other_attributes: HashMap<String, QuotedOrUnquoted>,
 }
 
 impl AlternativeMedia {
-    pub fn from_hashmap(mut attrs: HashMap<String, QuotedOrUnquoted>) -> AlternativeMedia {
-        AlternativeMedia {
-            media_type: attrs
-                .get("TYPE")
-                .and_then(|s| AlternativeMediaType::from_str(s.to_string().as_str()).ok())
-                .unwrap_or_default(),
-            uri: attrs.remove("URI").map(|u| u.to_string()),
-            group_id: attrs.remove("GROUP-ID").unwrap_or_default().to_string(),
-            language: attrs.remove("LANGUAGE").map(|l| l.to_string()),
-            assoc_language: attrs.remove("ASSOC-LANGUAGE").map(|a| a.to_string()),
-            name: attrs.remove("NAME").unwrap_or_default().to_string(),
-            default: bool_default_false!(attrs.remove("DEFAULT").map(|s| s.to_string())),
-            autoselect: bool_default_false!(attrs.remove("AUTOSELECT").map(|s| s.to_string())),
-            forced: bool_default_false!(attrs.remove("FORCED").map(|f| f.to_string())),
-            instream_id: attrs.remove("INSTREAM-ID").map(|i| i.to_string()),
-            characteristics: attrs.remove("CHARACTERISTICS").map(|c| c.to_string()),
-            channels: attrs.remove("CHANNELS").map(|c| c.to_string()),
+    pub fn from_hashmap(
+        mut attrs: HashMap<String, QuotedOrUnquoted>,
+    ) -> Result<AlternativeMedia, String> {
+        let media_type = unquoted_string_parse!(attrs, "TYPE")
+            .ok_or_else(|| String::from("EXT-X-MEDIA without mandatory TYPE attribute"))?;
+        let uri = quoted_string!(attrs, "URI");
+
+        if media_type == AlternativeMediaType::ClosedCaptions && uri.is_some() {
+            return Err(String::from(
+                "URI attribute must not be included in CLOSED-CAPTIONS Alternative Medias",
+            ));
         }
+
+        let group_id = quoted_string!(attrs, "GROUP-ID")
+            .ok_or_else(|| String::from("EXT-X-MEDIA without mandatory GROUP-ID attribute"))?;
+        let language = quoted_string!(attrs, "LANGUAGE");
+        let assoc_language = quoted_string!(attrs, "ASSOC-LANGUAGE");
+        let name = quoted_string!(attrs, "NAME")
+            .ok_or_else(|| String::from("EXT-X-MEDIA without mandatory NAME attribute"))?;
+        let default = bool_default_false!(attrs, "DEFAULT");
+        let autoselect = bool_default_false!(attrs, "AUTOSELECT");
+
+        if media_type != AlternativeMediaType::Subtitles && attrs.contains_key("FORCED") {
+            return Err(String::from(
+                "FORCED attribute must not be included in non-SUBTITLE Alternative Medias",
+            ));
+        }
+        let forced = bool_default_false!(attrs, "FORCED");
+
+        if media_type != AlternativeMediaType::ClosedCaptions && attrs.contains_key("INSTREAM-ID") {
+            return Err(String::from("INSTREAM-ID attribute must not be included in non-CLOSED-CAPTIONS Alternative Medias"));
+        } else if media_type == AlternativeMediaType::ClosedCaptions
+            && !attrs.contains_key("INSTREAM-ID")
+        {
+            return Err(String::from(
+                "INSTREAM-ID attribute must be included in CLOSED-CAPTIONS Alternative Medias",
+            ));
+        }
+        let instream_id = quoted_string_parse!(attrs, "INSTREAM-ID");
+        let characteristics = quoted_string!(attrs, "CHARACTERISTICS");
+        let channels = quoted_string!(attrs, "CHANNELS");
+
+        Ok(AlternativeMedia {
+            media_type,
+            uri,
+            group_id,
+            language,
+            assoc_language,
+            name,
+            default,
+            autoselect,
+            forced,
+            instream_id,
+            characteristics,
+            channels,
+        })
     }
 
     pub fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
         write!(w, "#EXT-X-MEDIA:")?;
         write!(w, "TYPE={}", self.media_type)?;
-        write_some_attribute_quoted!(w, ",URI", &self.uri)?;
+        if self.media_type != AlternativeMediaType::ClosedCaptions {
+            write_some_attribute_quoted!(w, ",URI", &self.uri)?;
+        }
         write!(w, ",GROUP-ID=\"{}\"", self.group_id)?;
         write_some_attribute_quoted!(w, ",LANGUAGE", &self.language)?;
         write_some_attribute_quoted!(w, ",ASSOC-LANGUAGE", &self.assoc_language)?;
@@ -450,10 +494,13 @@ impl AlternativeMedia {
         if self.autoselect {
             write!(w, ",AUTOSELECT=YES")?;
         }
-        if self.forced {
+        if self.forced && self.media_type == AlternativeMediaType::Subtitles {
             write!(w, ",FORCED=YES")?;
         }
-        write_some_attribute_quoted!(w, ",INSTREAM-ID", &self.instream_id)?;
+        if self.media_type == AlternativeMediaType::ClosedCaptions {
+            // FIXME: Mandatory for closed captions
+            write_some_attribute_quoted!(w, ",INSTREAM-ID", &self.instream_id)?;
+        }
         write_some_attribute_quoted!(w, ",CHARACTERISTICS", &self.characteristics)?;
         write_some_attribute_quoted!(w, ",CHANNELS", &self.channels)?;
         writeln!(w)
@@ -466,6 +513,7 @@ pub enum AlternativeMediaType {
     Video,
     Subtitles,
     ClosedCaptions,
+    Other(String),
 }
 
 impl FromStr for AlternativeMediaType {
@@ -506,6 +554,42 @@ impl fmt::Display for AlternativeMediaType {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone)]
+pub enum InstreamId {
+    CC(u8),
+    Service(u8),
+    Other(String),
+}
+
+impl FromStr for InstreamId {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<InstreamId, String> {
+        if let Some(cc) = s.strip_prefix("CC") {
+            let cc = cc
+                .parse::<u8>()
+                .map_err(|err| format!("Unable to create InstreamId from {:?}: {}", s, err))?;
+            Ok(InstreamId::CC(cc))
+        } else if let Some(service) = s.strip_prefix("SERVICE") {
+            let service = service
+                .parse::<u8>()
+                .map_err(|err| format!("Unable to create InstreamId from {:?}: {}", s, err))?;
+            Ok(InstreamId::Service(service))
+        } else {
+            Err(format!("Unable to create InstreamId from {:?}", s))
+        }
+    }
+}
+
+impl fmt::Display for InstreamId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            InstreamId::CC(cc) => write!(f, "CC{}", cc),
+            InstreamId::Service(service) => write!(f, "SERVICE{}", service),
+        }
+    }
+}
+
 /// [`#EXT-X-SESSION-KEY:<attribute-list>`](https://tools.ietf.org/html/draft-pantos-http-live-streaming-19#section-4.3.4.5)
 /// The EXT-X-SESSION-KEY tag allows encryption keys from Media Playlists
 /// to be specified in a Master Playlist.  This allows the client to
@@ -535,19 +619,18 @@ pub struct SessionData {
     pub data_id: String,
     pub field: SessionDataField,
     pub language: Option<String>,
+    pub other_attributes: HashMap<String, QuotedOrUnquoted>,
 }
 
 impl SessionData {
     pub fn from_hashmap(
         mut attrs: HashMap<String, QuotedOrUnquoted>,
     ) -> Result<SessionData, String> {
-        let data_id = match attrs.remove("DATA-ID") {
-            Some(data_id) => data_id,
-            None => return Err("EXT-X-SESSION-DATA field without DATA-ID".to_string()),
-        };
+        let data_id = quoted_string!(attrs, "DATA-ID")
+            .ok_or_else(|| String::from("EXT-X-SESSION-DATA field without DATA-ID attribute"))?;
 
-        let value = attrs.remove("VALUE").map(|v| v.to_string());
-        let uri = attrs.remove("URI").map(|u| u.to_string());
+        let value = quoted_string!(attrs, "VALUE");
+        let uri = quoted_string!(attrs, "URI");
 
         // SessionData must contain either a VALUE or a URI,
         // but not both https://tools.ietf.org/html/rfc8216#section-4.3.4.4
@@ -556,22 +639,24 @@ impl SessionData {
             (None, Some(uri)) => SessionDataField::Uri(uri),
             (Some(_), Some(_)) => {
                 return Err(format![
-                    "EXT-X-SESSION-DATA tag {} contains both a value and a uri",
+                    "EXT-X-SESSION-DATA tag {} contains both a value and an URI",
                     data_id
                 ])
             }
             (None, None) => {
                 return Err(format![
-                    "EXT-X-SESSION-DATA tag {} must contain either a value or a uri",
+                    "EXT-X-SESSION-DATA tag {} must contain either a value or an URI",
                     data_id
                 ])
             }
         };
 
+        let language = quoted_string!(attrs, "LANGUAGE");
+
         Ok(SessionData {
-            data_id: data_id.to_string(),
+            data_id,
             field,
-            language: attrs.remove("LANGUAGE").map(|s| s.to_string()),
+            language,
         })
     }
 
@@ -614,6 +699,8 @@ pub struct MediaPlaylist {
     pub start: Option<Start>,
     /// `#EXT-X-INDEPENDENT-SEGMENTS`
     pub independent_segments: bool,
+    /// Unknown tags before the first media segment
+    pub unknown_tags: Vec<ExtTag>,
 }
 
 impl MediaPlaylist {
@@ -663,6 +750,7 @@ impl MediaPlaylist {
 pub enum MediaPlaylistType {
     Event,
     Vod,
+    Other(String),
 }
 
 impl FromStr for MediaPlaylistType {
@@ -720,7 +808,7 @@ pub struct MediaSegment {
     /// `#EXT-X-PROGRAM-DATE-TIME:<YYYY-MM-DDThh:mm:ssZ>`
     pub program_date_time: Option<String>,
     /// `#EXT-X-DATERANGE:<attribute-list>`
-    pub daterange: Option<String>,
+    pub daterange: Option<DateRange>,
     /// `#EXT-`
     pub unknown_tags: Vec<ExtTag>,
 }
@@ -771,6 +859,47 @@ impl MediaSegment {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+pub enum KeyMethod {
+    None,
+    AES128,
+    SampleAES,
+    Other(String),
+}
+
+impl Default for KeyMethod {
+    fn default() -> Self {
+        KeyMethod::None
+    }
+}
+
+impl FromStr for KeyMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<KeyMethod, String> {
+        match s {
+            "NONE" => Ok(KeyMethod::None),
+            "AES-128" => Ok(KeyMethod::AES128),
+            "SAMPLE-AES" => Ok(KeyMethod::SampleAES),
+            _ => Err(format!("Unable to create KeyMethod from {:?}", s)),
+        }
+    }
+}
+
+impl fmt::Display for KeyMethod {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match *self {
+                KeyMethod::None => "NONE",
+                KeyMethod::AES128 => "AES-128",
+                KeyMethod::SampleAES => "SAMPLE-AES",
+            }
+        )
+    }
+}
+
 /// [`#EXT-X-KEY:<attribute-list>`](https://tools.ietf.org/html/draft-pantos-http-live-streaming-19#section-4.3.2.4)
 ///
 /// Media Segments MAY be encrypted.  The EXT-X-KEY tag specifies how to
@@ -781,7 +910,7 @@ impl MediaSegment {
 /// same Media Segment if they ultimately produce the same decryption key.
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct Key {
-    pub method: String,
+    pub method: KeyMethod,
     pub uri: Option<String>,
     pub iv: Option<String>,
     pub keyformat: Option<String>,
@@ -789,22 +918,31 @@ pub struct Key {
 }
 
 impl Key {
-    pub fn from_hashmap(mut attrs: HashMap<String, QuotedOrUnquoted>) -> Key {
-        Key {
-            method: attrs.remove("METHOD").unwrap_or_default().to_string(),
-            uri: attrs.remove("URI").map(|u| u.to_string()),
-            iv: attrs.remove("IV").map(|i| i.to_string()),
-            keyformat: attrs.remove("KEYFORMAT").map(|k| k.to_string()),
-            keyformatversions: attrs.remove("KEYFORMATVERSIONS").map(|k| k.to_string()),
-        }
+    pub fn from_hashmap(mut attrs: HashMap<String, QuotedOrUnquoted>) -> Result<Key, String> {
+        let method = unquoted_string_parse!(attrs, "METHOD")
+            .ok_or_else(|| String::from("EXT-X-KEY without mandatory METHOD attribute"))?;
+
+        let uri = quoted_string!(attrs, "URI");
+        // FIXME required unless None
+        let iv = unquoted_string!(attrs, "IV");
+        let keyformat = quoted_string!(attrs, "KEYFORMAT");
+        let keyformatversions = quoted_string!(attrs, "KEYFORMATVERSIONS");
+
+        Ok(Key {
+            method,
+            uri,
+            iv,
+            keyformat,
+            keyformatversions,
+        })
     }
 
     pub fn write_attributes_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
         write!(w, "METHOD={}", self.method)?;
         write_some_attribute_quoted!(w, ",URI", &self.uri)?;
         write_some_attribute!(w, ",IV", &self.iv)?;
-        write_some_attribute!(w, ",KEYFORMAT", &self.keyformat)?;
-        write_some_attribute!(w, ",KEYFORMATVERSIONS", &self.keyformatversions)
+        write_some_attribute_quoted!(w, ",KEYFORMAT", &self.keyformat)?;
+        write_some_attribute_quoted!(w, ",KEYFORMATVERSIONS", &self.keyformatversions)
     }
 }
 
@@ -820,6 +958,7 @@ impl Key {
 pub struct Map {
     pub uri: String,
     pub byte_range: Option<ByteRange>,
+    pub other_attributes: HashMap<String, QuotedOrUnquoted>,
 }
 
 impl Map {
@@ -859,16 +998,17 @@ impl ByteRange {
 /// The EXT-X-DATERANGE tag associates a Date Range (i.e. a range of time
 /// defined by a starting and ending date) with a set of attribute /
 /// value pairs.
-#[derive(Debug, Default, PartialEq, Eq, Clone)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub struct DateRange {
     pub id: String,
     pub class: Option<String>,
     pub start_date: String,
     pub end_date: Option<String>,
-    pub duration: Option<String>,
-    pub planned_duration: Option<String>,
-    pub x_prefixed: Option<String>, //  X-<client-attribute>
+    pub duration: Option<f64>,
+    pub planned_duration: Option<f64>,
+    pub x_prefixed: HashMap<String, QuotedOrUnquoted>, //  X-<client-attribute>
     pub end_on_next: bool,
+    pub other_attributes: HashMap<String, QuotedOrUnquoted>,
 }
 
 // -----------------------------------------------------------------------------------------------
@@ -880,10 +1020,11 @@ pub struct DateRange {
 /// The EXT-X-START tag indicates a preferred point at which to start
 /// playing a Playlist. By default, clients SHOULD start playback at
 /// this point when beginning a playback session.
-#[derive(Debug, Default, PartialEq, Eq, Clone)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub struct Start {
-    pub time_offset: String,
-    pub precise: Option<String>,
+    pub time_offset: f64,
+    pub precise: bool,
+    pub other_attributes: HashMap<String, QuotedOrUnquoted>,
 }
 
 impl Start {

@@ -200,20 +200,50 @@ fn create_and_parse_master_playlist_empty() {
 fn create_and_parse_master_playlist_full() {
     let mut playlist_original = Playlist::MasterPlaylist(MasterPlaylist {
         version: Some(6),
-        alternatives: vec![AlternativeMedia {
-            media_type: AlternativeMediaType::Audio,
-            uri: Some("alt-media-uri".into()),
-            group_id: "group-id".into(),
-            language: Some("language".into()),
-            assoc_language: Some("assoc-language".into()),
-            name: "Xmedia".into(),
-            default: true,    // Its absence indicates an implicit value of NO
-            autoselect: true, // Its absence indicates an implicit value of NO
-            forced: true,     // Its absence indicates an implicit value of NO
-            instream_id: Some("instream_id".into()),
-            characteristics: Some("characteristics".into()),
-            channels: Some("channels".into()),
-        }],
+        alternatives: vec![
+            AlternativeMedia {
+                media_type: AlternativeMediaType::Audio,
+                uri: Some("alt-media-uri".into()),
+                group_id: "group-id".into(),
+                language: Some("language".into()),
+                assoc_language: Some("assoc-language".into()),
+                name: "Xmedia".into(),
+                default: true,    // Its absence indicates an implicit value of NO
+                autoselect: true, // Its absence indicates an implicit value of NO
+                forced: false,    // Its absence indicates an implicit value of NO
+                instream_id: None,
+                characteristics: Some("characteristics".into()),
+                channels: Some("channels".into()),
+            },
+            AlternativeMedia {
+                media_type: AlternativeMediaType::Subtitles,
+                uri: Some("alt-media-uri".into()),
+                group_id: "group-id".into(),
+                language: Some("language".into()),
+                assoc_language: Some("assoc-language".into()),
+                name: "Xmedia".into(),
+                default: true,    // Its absence indicates an implicit value of NO
+                autoselect: true, // Its absence indicates an implicit value of NO
+                forced: true,     // Its absence indicates an implicit value of NO
+                instream_id: None,
+                characteristics: Some("characteristics".into()),
+                channels: Some("channels".into()),
+            },
+            AlternativeMedia {
+                media_type: AlternativeMediaType::ClosedCaptions,
+                uri: None,
+                group_id: "group-id".into(),
+                language: Some("language".into()),
+                assoc_language: Some("assoc-language".into()),
+                name: "Xmedia".into(),
+                default: true,    // Its absence indicates an implicit value of NO
+                autoselect: true, // Its absence indicates an implicit value of NO
+                forced: false,    // Its absence indicates an implicit value of NO
+                instream_id: Some(InstreamId::CC(1)),
+                characteristics: Some("characteristics".into()),
+                channels: Some("channels".into()),
+            },
+        ],
         variants: vec![VariantStream {
             is_i_frame: false,
             uri: "masterplaylist-uri".into(),
@@ -237,7 +267,7 @@ fn create_and_parse_master_playlist_full() {
             language: Some("SessionDataLanguage".into()),
         }],
         session_key: vec![SessionKey(Key {
-            method: "AES-128".into(),
+            method: KeyMethod::AES128,
             uri: Some("https://secure.domain.com".into()),
             iv: Some("0xb059217aa2649ce170b734".into()),
             keyformat: Some("xXkeyformatXx".into()),
@@ -304,7 +334,7 @@ fn create_and_parse_media_playlist_full() {
             }),
             discontinuity: true,
             key: Some(Key {
-                method: "AES-128".into(),
+                method: KeyMethod::None,
                 uri: Some("https://secure.domain.com".into()),
                 iv: Some("0xb059217aa2649ce170b734".into()),
                 keyformat: Some("xXkeyformatXx".into()),
