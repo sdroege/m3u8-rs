@@ -229,12 +229,13 @@ pub struct VariantStream {
 }
 
 impl VariantStream {
-    pub fn from_hashmap(
+    pub(crate) fn from_hashmap(
         mut attrs: HashMap<String, QuotedOrUnquoted>,
         is_i_frame: bool,
     ) -> Result<VariantStream, String> {
         let uri = quoted_string!(attrs, "URI").unwrap_or_default();
 
+        // TODO: keep in attrs if parsing optional attributes fails
         let bandwidth = unquoted_string_parse!(attrs, "BANDWIDTH", |s: &str| s
             .parse::<u64>()
             .map_err(|err| format!("Failed to parse BANDWIDTH attribute: {}", err)))
@@ -270,10 +271,11 @@ impl VariantStream {
             video,
             subtitles,
             closed_captions,
+            other_attributes: attrs,
         })
     }
 
-    pub fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
+    pub(crate) fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
         if self.is_i_frame {
             write!(w, "#EXT-X-I-FRAME-STREAM-INF:")?;
             self.write_stream_inf_common_attributes(w)?;
@@ -336,7 +338,7 @@ impl FromStr for Resolution {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum HDCPLevel {
     Type0,
     Type1,
@@ -371,6 +373,7 @@ impl fmt::Display for HDCPLevel {
     }
 }
 
+/// TODO docs
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum ClosedCaptionGroupId {
     None,
@@ -420,7 +423,7 @@ pub struct AlternativeMedia {
 }
 
 impl AlternativeMedia {
-    pub fn from_hashmap(
+    pub(crate) fn from_hashmap(
         mut attrs: HashMap<String, QuotedOrUnquoted>,
     ) -> Result<AlternativeMedia, String> {
         let media_type = unquoted_string_parse!(attrs, "TYPE")
@@ -478,7 +481,7 @@ impl AlternativeMedia {
         })
     }
 
-    pub fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
+    pub(crate) fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
         write!(w, "#EXT-X-MEDIA:")?;
         write!(w, "TYPE={}", self.media_type)?;
         if self.media_type != AlternativeMediaType::ClosedCaptions {
@@ -507,7 +510,7 @@ impl AlternativeMedia {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum AlternativeMediaType {
     Audio,
     Video,
@@ -554,7 +557,7 @@ impl fmt::Display for AlternativeMediaType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum InstreamId {
     CC(u8),
     Service(u8),
@@ -598,7 +601,7 @@ impl fmt::Display for InstreamId {
 pub struct SessionKey(pub Key);
 
 impl SessionKey {
-    pub fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
+    pub(crate) fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
         write!(w, "#EXT-X-SESSION-KEY:")?;
         self.0.write_attributes_to(w)?;
         writeln!(w)
@@ -623,7 +626,7 @@ pub struct SessionData {
 }
 
 impl SessionData {
-    pub fn from_hashmap(
+    pub(crate) fn from_hashmap(
         mut attrs: HashMap<String, QuotedOrUnquoted>,
     ) -> Result<SessionData, String> {
         let data_id = quoted_string!(attrs, "DATA-ID")
@@ -660,7 +663,7 @@ impl SessionData {
         })
     }
 
-    pub fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
+    pub(crate) fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
         write!(w, "#EXT-X-SESSION-DATA:")?;
         write!(w, "DATA-ID=\"{}\"", self.data_id)?;
         match &self.field {
@@ -746,7 +749,7 @@ impl MediaPlaylist {
 }
 
 /// [`#EXT-X-PLAYLIST-TYPE:<EVENT|VOD>`](https://tools.ietf.org/html/draft-pantos-http-live-streaming-19#section-4.3.3.5)
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum MediaPlaylistType {
     Event,
     Vod,
@@ -818,7 +821,7 @@ impl MediaSegment {
         Default::default()
     }
 
-    pub fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
+    pub(crate) fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
         if let Some(ref byte_range) = self.byte_range {
             write!(w, "#EXT-X-BYTERANGE:")?;
             byte_range.write_value_to(w)?;
@@ -859,7 +862,7 @@ impl MediaSegment {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum KeyMethod {
     None,
     AES128,
@@ -918,7 +921,9 @@ pub struct Key {
 }
 
 impl Key {
-    pub fn from_hashmap(mut attrs: HashMap<String, QuotedOrUnquoted>) -> Result<Key, String> {
+    pub(crate) fn from_hashmap(
+        mut attrs: HashMap<String, QuotedOrUnquoted>,
+    ) -> Result<Key, String> {
         let method = unquoted_string_parse!(attrs, "METHOD")
             .ok_or_else(|| String::from("EXT-X-KEY without mandatory METHOD attribute"))?;
 
@@ -1028,7 +1033,7 @@ pub struct Start {
 }
 
 impl Start {
-    pub fn from_hashmap(mut attrs: HashMap<String, QuotedOrUnquoted>) -> Start {
+    pub(crate) fn from_hashmap(mut attrs: HashMap<String, QuotedOrUnquoted>) -> Start {
         Start {
             time_offset: attrs.remove("TIME-OFFSET").unwrap_or_default().to_string(),
             precise: attrs
@@ -1038,7 +1043,7 @@ impl Start {
         }
     }
 
-    pub fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
+    pub(crate) fn write_to<T: Write>(&self, w: &mut T) -> std::io::Result<()> {
         write!(w, "#EXT-X-START:TIME-OFFSET={}", self.time_offset)?;
         write_some_attribute!(w, ",PRECISE", &self.precise)?;
         writeln!(w)
